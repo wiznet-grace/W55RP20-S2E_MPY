@@ -1,0 +1,22 @@
+# main.py
+import time
+
+MODE = "spi"        # "spi" or "uart"
+AT_CMD = "LI" 
+AT_PARAM = ""
+
+if MODE == "spi":
+    import w55rp20_s2e_spi as s2e
+elif MODE == "uart":
+    import w55rp20_s2e_uart as s2e
+else:
+    raise ValueError("MODE must be 'spi' or 'uart'")
+
+# Common logic
+s2e.print_info()
+
+while True:
+    # GC runs every 30 calls inside the module
+    rs = s2e.send_cmd(AT_CMD, AT_PARAM)
+    print(rs)
+    time.sleep_ms(1000)
