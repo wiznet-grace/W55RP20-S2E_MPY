@@ -16,7 +16,10 @@ else:
 s2e.print_info()
 
 while True:
-    # GC runs every 30 calls inside the module
-    rs = s2e.send_cmd(AT_CMD, AT_PARAM)
-    print(rs)
-    time.sleep_ms(1000)
+    try:
+        # GC runs every 30 calls inside the module
+        rs = s2e.send_cmd(AT_CMD, AT_PARAM)
+        print(rs)
+        time.sleep_ms(1000)
+    except Exception as e:
+        print(f"[ERROR]: {e}")
