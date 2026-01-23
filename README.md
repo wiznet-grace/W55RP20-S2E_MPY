@@ -5,6 +5,10 @@
 ## 🇰🇷 [KR] 기술 설명서
 RP2040 MicroPython 환경에서 **W55RP20-S2E** 모듈을 제어하기 위한 드라이버 상세 기술 문서입니다.
 
+### 0. 개발 환경 (Environment)
+> * **Master Board:** Raspberry Pi Pico (RP2040)
+> * **Firmware:** MicroPython v1.27.0 Release
+
 ### 1. 폴더 및 파일 구조 (Directory Structure)
 
 ```text
@@ -75,6 +79,10 @@ W55RP20-S2E_MPY/
 
 ## 🇺🇸 [EN] Technical Manual
 Detailed technical documentation for the W55RP20-S2E module driver on RP2040 MicroPython.
+
+### 0. Environment
+> * **Master Board:** Raspberry Pi Pico (RP2040)
+> * **Firmware:** MicroPython v1.27.0 Release
 
 ### 1. Directory Structure
 
