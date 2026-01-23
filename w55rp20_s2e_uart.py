@@ -152,6 +152,10 @@ def send_cmd(at_cmd: str, at_param: str):
 
     result = {}
     try:
+        # [Added] Flush: Clear any residual data in the RX buffer before sending a command
+        while uart.any():
+            uart.read()
+
         if param:
             # SET
             line = (cmd + param + "\r\n").encode("ascii")
