@@ -1,9 +1,9 @@
 # main.py
 import time
 
-MODE = "spi"        # "spi" or "uart"
-AT_CMD = "LI" 
-AT_PARAM = ""
+MODE = "spi"   # "spi" or "uart"
+AT_CMD = "LI"	# e.g. "LI", "VR", "MC" ...
+AT_PARAM = ""   # "" => GET, non-empty => SET (for SPI). UART always sends AT_CMD+AT_PARAM as text.
 
 if MODE == "spi":
     import w55rp20_s2e_spi as s2e
