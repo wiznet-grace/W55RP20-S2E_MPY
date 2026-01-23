@@ -68,12 +68,61 @@ def hexdump(b: bytes, width: int = 16):
 # -----------------------
 # HELP
 # -----------------------
-def printHelp():
+def print_help():
     print("=== W55RP20-S2E AT Help ===")
     print("Enter command mode: +++ (guard time >= 500ms before/after)")
     print("Exit command mode: EX")
     print("Save settings: SV  | Reboot: RT  | Factory reset: FR")
-    print("Type HELP or ? to show this list again.") 
+    print("")
+    print("[Device Info] (RO)")
+    print("MC  -> MAC address (ex: MC00:08:DC:00:00:01)")
+    print("VR  -> Firmware version (ex: VR1.0.0)")
+    print("MN  -> Product name (ex: MNWIZ5XXRSR-RP)")
+    print("ST  -> Status (BOOT/OPEN/CONNECT/UPGRADE/ATMODE)")
+    print("UN  -> UART interface str (ex: UNRS-232/TTL)")
+    print("UI  -> UART interface code (ex: UI0)")
+    print("")
+    print("[Network] (RW)")
+    print("OPx -> Mode: 0 TCP client, 1 TCP server, 2 mixed, 3 UDP, 4 SSL, 5 MQTT, 6 MQTTS")
+    print("IMx -> IP alloc: 0 static, 1 DHCP")
+    print("LIa.b.c.d -> Local IP (ex: LI192.168.11.2)")
+    print("SMa.b.c.d -> Subnet (ex: SM255.255.255.0)")
+    print("GWa.b.c.d -> Gateway (ex: GW192.168.11.1)")
+    print("DSa.b.c.d -> DNS (ex: DS8.8.8.8)")
+    print("LPn -> Local port (ex: LP5000)")
+    print("RHa.b.c.d / domain -> Remote host (ex: RH192.168.11.3)")
+    print("RPn -> Remote port (ex: RP5000)")
+    print("")
+    print("[UART] (RW)")
+    print("BRx -> Baud (12=115200, 13=230400)")
+    print("DBx -> Data bits (0=7bit, 1=8bit)")
+    print("PRx -> Parity (0=None, 1=Odd, 2=Even)")
+    print("SBx -> Stop bits (0=1bit, 1=2bit)")
+    print("FLx -> Flow (0=None, 1=XON/XOFF, 2=RTS/CTS)")
+    print("ECx -> Echo (0=Off, 1=On)")
+    print("")
+    print("[Packing] (RW)")
+    print("PTn -> Time delimiter ms (ex: PT1000)")
+    print("PSn -> Size delimiter bytes (ex: PS64)")
+    print("PDxx -> Char delimiter hex (ex: PD0D)")
+    print("")
+    print("[Options] (RW)")
+    print("ITn -> Inactivity sec (ex: IT30)")
+    print("RIn -> Reconnect interval ms (ex: RI3000)")
+    print("CPx -> Conn password enable (0/1)")
+    print("NPxxxx -> Conn password (max 8 chars)")
+    print("SPxxxx -> Search ID (max 8 chars)")
+    print("DGx -> Debug msg (0/1)")
+    print("KAx -> Keep-alive (0/1)")
+    print("KIn -> KA initial interval ms (ex: KI7000)")
+    print("KEn -> KA retry interval ms (ex: KE5000)")
+    print("SOn -> SSL recv timeout ms (ex: SO2000)")
+    print("")
+    print("[MQTT] (RW)")
+    print("QUuser QPpass QCid QK60 PUtopic")
+    print("U0sub U1sub U2sub QO0")
+    print("")
+    print("Type HELP or ? to show this list again.")
 
 # -----------------------
 # SPI bus init
@@ -228,7 +277,7 @@ def send_cmd(at_cmd: str, at_param: str):
 
     cmd_u = cmd.upper()
     if cmd_u in ("HELP", "?"):
-        printHelp()
+        print_help()
         return {"type": "help", "ok": True}
 
     if at_param:

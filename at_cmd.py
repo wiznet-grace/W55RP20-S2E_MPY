@@ -14,12 +14,12 @@ else:
 
 # Common logic
 s2e.print_info()
+s2e.print_help()
 
 while True:
     try:
-        # GC runs every 30 calls inside the module
-        rs = s2e.send_cmd(AT_CMD, AT_PARAM)
-        print(rs)
+        result = s2e.send_cmd(AT_CMD, AT_PARAM)
+        print(result)
         time.sleep_ms(1000)
     except Exception as e:
         print(f"[ERROR]: {e}")
