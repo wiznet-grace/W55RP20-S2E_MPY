@@ -3,28 +3,30 @@
 
 from machine import SPI, Pin
 import time
-import gc
 
-# -----------------------
+# -------------------------------------------------------------------------
+# Configuration
+# -------------------------------------------------------------------------
+DEBUG_PRINT = True
+
 # Pin map (Pico)
-# -----------------------
-SCK    = 2
-MOSI   = 3
-MISO   = 4
-CS     = 5
-INT    = 26
-IF_SEL = 13      # High=SPI, Low=UART
+SCK      = 2
+MOSI     = 3
+MISO     = 4
+CS       = 5
+INT      = 26
+MODE_SEL = 13       # High=SPI, Low=UART
 
-# -----------------------
 # SPI config
-# -----------------------
 SPI_ID    = 0
-SPI_BAUD  = 50_000
+SPI_BAUD  = 10_000_000
 POL       = 0
 PHA       = 0
 
+# Tuning: Critical Timing Constants
 CS_HOLD_US = 2
-CS_GAP_US  = 2
+CS_GAP_US  = 20       # Inter-transfer delay for stability
+INT_CS_DELAY_US = 200 # Delay after INT low to allow module preparation
 
 # -----------------------
 # Protocol constants
@@ -34,17 +36,54 @@ ACK   = 0x0A
 NACK  = 0x0B
 CMD_B0 = 0xB0
 RSP_B1 = 0xB1
+DATA_TX_A0 = 0xA0  # Master Write Data Length (DATA TX)
 
 # -----------------------
-# Timeouts / loop policy (SPI)
+# Error codes
 # -----------------------
-INT_TIMEOUT_MS = 50
-RX_TIMEOUT_MS  = 1500
-ACK_TIMEOUT_MS = 1500
+SUCCESS = 0
+ERR_NACK = -1
+ERR_TIMEOUT = -2
+ERR_INVALID_HEADER = -3
 
-# GC config (Run every 30 calls)
-GC_EVERY = 30
-_gc_count = 0
+class S2EError(Exception):
+    """Internal exception carrying an error code (C-style)."""
+    def __init__(self, msg: str, err_code: int, stage: str = None):
+        super().__init__(msg)
+        self.err_code = err_code
+        self.stage = stage
+
+# -----------------------
+# Timeouts / loop policy
+# -----------------------
+INT_TIMEOUT_MS = 200
+RX_TIMEOUT_MS  = 2000
+ACK_TIMEOUT_MS = 2000
+
+# DATA RX/TX tuning
+DATA_POLL_WAIT_MS = 10   # Short wait time for polling loop responsiveness
+DATA_SCAN_MAX     = 16384
+
+# -----------------------
+# SPI Primitives
+# -----------------------
+_tx1 = bytearray(1)
+_rx1 = bytearray(1)
+CAP_MAX = 2048
+_RX_BUF = bytearray(CAP_MAX)
+_RX_MV  = memoryview(_RX_BUF)
+
+def xfer_byte(tx: int) -> int:
+    """Byte-by-byte transfer (Used for polling ACK/Status)."""
+    _tx1[0] = tx & 0xFF
+    cs.value(0)
+    try:
+        if CS_HOLD_US: time.sleep_us(CS_HOLD_US)
+        spi.write_readinto(_tx1, _rx1)
+        return _rx1[0]
+    finally:
+        cs.value(1)
+        if CS_GAP_US: time.sleep_us(CS_GAP_US)
 
 # -----------------------
 # Helpers
@@ -55,15 +94,71 @@ def ticks_deadline(timeout_ms: int) -> int:
 def timed_out(deadline: int) -> bool:
     return time.ticks_diff(time.ticks_ms(), deadline) >= 0
 
-def hexdump(b: bytes, width: int = 16):
-    for i in range(0, len(b), width):
-        c = b[i:i+width]
-        print("%04X  %-*s  %s" % (
-            i,
-            width * 3,
-            " ".join("%02X" % x for x in c),
-            "".join(chr(x) if 32 <= x <= 126 else "." for x in c),
-        ))
+def wait_int_low(timeout_ms: int) -> bool:
+    """
+    Checks INT pin. If low, returns True immediately.
+    Otherwise polls until timeout.
+    """
+    # 1. Fast path
+    if intp.value() == 0:
+        return True
+        
+    # 2. Polling
+    dl = ticks_deadline(timeout_ms)
+    while not timed_out(dl):
+        if intp.value() == 0:
+            return True
+    return False
+
+def wait_ack(timeout_ms: int = 1500, max_bytes: int = 4096):
+    dl = ticks_deadline(timeout_ms)
+    cnt = 0
+    while not timed_out(dl) and cnt < max_bytes:
+        b = xfer_byte(DUMMY)
+        cnt += 1
+        if b == ACK:
+            xfer_byte(DUMMY); xfer_byte(DUMMY); xfer_byte(DUMMY)
+            return True
+        if b == NACK:
+            return False
+    return None
+
+def read_b1_payload_status(timeout_ms: int = 2000, scan_max: int = 8192):
+    """
+    Helper for DATA RX. Returns tuple with status code.
+    returns: (memoryview, length, err_code, stage)
+    """
+    dl = ticks_deadline(timeout_ms)
+    scanned = 0
+    while not timed_out(dl) and scanned < scan_max:
+        b = xfer_byte(DUMMY)
+        scanned += 1
+
+        if b == NACK:
+            return (None, 0, ERR_NACK, "wait_b1")
+
+        if b == RSP_B1:
+            len_l = xfer_byte(DUMMY)
+            len_h = xfer_byte(DUMMY)
+            _     = xfer_byte(DUMMY)  # dummy 0xFF
+            length = len_l | (len_h << 8)
+
+            if length == 0:
+                return (_RX_MV[:0], 0, SUCCESS, None)
+
+            rd = length if length <= CAP_MAX else CAP_MAX
+            for i in range(rd):
+                _RX_BUF[i] = xfer_byte(DUMMY)
+            for _i in range(length - rd):
+                xfer_byte(DUMMY)
+            return (_RX_MV[:rd], rd, SUCCESS, None)
+
+    return (None, 0, ERR_TIMEOUT, "wait_b1")
+
+def read_b1_payload(timeout_ms: int = 2000, scan_max: int = 8192):
+    """Legacy helper for AT CMD (returns tuple only)."""
+    mv, n, code, _ = read_b1_payload_status(timeout_ms, scan_max)
+    return (mv, n)
 
 # -----------------------
 # HELP
@@ -127,7 +222,7 @@ def print_help():
 # -----------------------
 # SPI bus init
 # -----------------------
-Pin(IF_SEL, Pin.OUT).value(1)      # Select SPI mode
+Pin(MODE_SEL, Pin.OUT).value(1)      # Select SPI mode
 time.sleep_ms(50)
 
 cs   = Pin(CS, Pin.OUT, value=1)
@@ -144,70 +239,6 @@ spi = SPI(
     mosi=Pin(MOSI),
     miso=Pin(MISO),
 )
-
-_tx1 = bytearray(1)
-_rx1 = bytearray(1)
-
-CAP_MAX = 2048
-_RX_BUF = bytearray(CAP_MAX)
-_RX_MV  = memoryview(_RX_BUF)
-
-def xfer_byte(tx: int) -> int:
-    _tx1[0] = tx & 0xFF
-    cs.value(0)
-    try:
-        if CS_HOLD_US:
-            time.sleep_us(CS_HOLD_US)
-        spi.write_readinto(_tx1, _rx1)
-        return _rx1[0]
-    finally:
-        cs.value(1)
-        if CS_GAP_US:
-            time.sleep_us(CS_GAP_US)
-
-def wait_int_low(timeout_ms: int) -> bool:
-    dl = ticks_deadline(timeout_ms)
-    while not timed_out(dl):
-        if intp.value() == 0:
-            return True
-        time.sleep_us(50)
-    return False
-
-def wait_ack(timeout_ms: int = 1500, max_bytes: int = 4096):
-    dl = ticks_deadline(timeout_ms)
-    cnt = 0
-    while not timed_out(dl) and cnt < max_bytes:
-        b = xfer_byte(DUMMY)
-        cnt += 1
-        if b == ACK:
-            xfer_byte(DUMMY); xfer_byte(DUMMY); xfer_byte(DUMMY)
-            return True
-        if b == NACK:
-            return False
-    return None
-
-def read_b1_payload(timeout_ms: int = 2000, scan_max: int = 8192):
-    dl = ticks_deadline(timeout_ms)
-    scanned = 0
-    while not timed_out(dl) and scanned < scan_max:
-        b = xfer_byte(DUMMY)
-        scanned += 1
-        if b == RSP_B1:
-            len_l = xfer_byte(DUMMY)
-            len_h = xfer_byte(DUMMY)
-            _     = xfer_byte(DUMMY)
-            length = len_l | (len_h << 8)
-
-            if length == 0:
-                return (_RX_MV[:0], 0)
-
-            rd = length if length <= CAP_MAX else CAP_MAX
-            for i in range(rd):
-                _RX_BUF[i] = xfer_byte(DUMMY)
-            for _i in range(length - rd):
-                xfer_byte(DUMMY)
-            return (_RX_MV[:rd], rd)
-    return (None, 0)
 
 # -----------------------
 # AT GET / SET
@@ -251,6 +282,77 @@ def at_set(cmd: str, ack_timeout_ms: int = 1500):
     if r2 is False: raise RuntimeError("NACK (AT payload)")
     return True
 
+# -----------------------
+# DATA TX/RX (Core Logic)
+# -----------------------
+def data_send(payload, ack_timeout_ms: int = ACK_TIMEOUT_MS):
+    """Send raw DATA using the DATA TX frame (0xA0 ... ACK ... payload ... ACK)."""
+    if payload is None:
+        payload = b""
+    if isinstance(payload, str):
+        payload = payload.encode("ascii")
+
+    ln = len(payload)
+    if ln > 0xFFFF:
+        raise ValueError("DATA payload too long")
+
+    # Header
+    xfer_byte(DATA_TX_A0)
+    xfer_byte(ln & 0xFF)
+    xfer_byte((ln >> 8) & 0xFF)
+    xfer_byte(DUMMY)
+
+    # Header ACK
+    r = wait_ack(timeout_ms=ack_timeout_ms)
+    if r is None:
+        raise S2EError("ACK timeout (DATA header)", ERR_TIMEOUT, "data_header_ack")
+    if r is False:
+        raise S2EError("NACK (DATA header)", ERR_NACK, "data_header_ack")
+
+    # Payload
+    for b in payload:
+        xfer_byte(b)
+
+    # Payload ACK
+    r2 = wait_ack(timeout_ms=ack_timeout_ms)
+    if r2 is None:
+        raise S2EError("ACK timeout (DATA payload)", ERR_TIMEOUT, "data_payload_ack")
+    if r2 is False:
+        raise S2EError("NACK (DATA payload)", ERR_NACK, "data_payload_ack")
+
+    return True
+
+
+def data_recv(int_timeout_ms: int = DATA_POLL_WAIT_MS,
+              rx_timeout_ms: int = RX_TIMEOUT_MS,
+              scan_max: int = DATA_SCAN_MAX):
+    """
+    Receive raw DATA using the DATA RX frame.
+    """
+    # 1. Wait for INT low
+    if not wait_int_low(int_timeout_ms):
+        return None
+
+    if INT_CS_DELAY_US:
+        time.sleep_us(INT_CS_DELAY_US)
+
+    # 2. Send Command 0xB0
+    xfer_byte(CMD_B0)
+    xfer_byte(DUMMY)
+    xfer_byte(DUMMY)
+    xfer_byte(DUMMY)
+
+    mv, n, err_code, stage = read_b1_payload_status(timeout_ms=rx_timeout_ms, scan_max=scan_max)
+    
+    if err_code != SUCCESS:
+        msg = "RX Timeout" if err_code == ERR_TIMEOUT else "RX NACK"
+        raise S2EError(msg, err_code, stage)
+        
+    return (mv, n)
+
+# -----------------------
+# Public APIs Helpers
+# -----------------------
 def _decode_resp_ascii(mv, n: int) -> str:
     raw = bytes(mv[:n])
     raw = raw.split(b"\x00", 1)[0]
@@ -265,12 +367,9 @@ def _parse_get_value(cmd: str, resp_ascii: str):
         tail = s
     return tail.strip()
 
-# -----------------------
-# Public send_cmd() API
-# -----------------------
-def send_cmd(at_cmd: str, at_param: str):
-    global _gc_count
-    
+_NO_PARAM_SET_CMDS = ("SV", "RT", "FR", "EX")
+
+def send_cmd(at_cmd: str, at_param: str):    
     cmd = (at_cmd or "").strip()
     if not cmd:
         raise ValueError("at_cmd is empty")
@@ -280,8 +379,8 @@ def send_cmd(at_cmd: str, at_param: str):
         print_help()
         return {"type": "help", "ok": True}
 
-    if at_param:
-        cmdline = cmd + at_param
+    if at_param or (cmd in _NO_PARAM_SET_CMDS):
+        cmdline = cmd + (at_param or "")
         ok = at_set(cmdline, ack_timeout_ms=ACK_TIMEOUT_MS)
         result = {"type": "set", "ok": bool(ok)}
     else:
@@ -293,18 +392,87 @@ def send_cmd(at_cmd: str, at_param: str):
             value = _parse_get_value(cmd, resp_ascii)
             result = {"type": "get", "ok": True, "value": value, "raw": resp_ascii.strip("\r\n")}
 
-    # [Modified] Run GC only once every N calls
-    if GC_EVERY > 0:
-        _gc_count += 1
-        if _gc_count >= GC_EVERY:
-            gc.collect()
-            _gc_count = 0
-
     return result
     
 def print_info():
     print("=== W55RP20-S2E SPI AT GET/SET test ===")
     print(f"SPI{SPI_ID} baud={SPI_BAUD} POL={POL} PHA={PHA}")
-    print(f"Pins: SCK=GP{SCK} MOSI=GP{MOSI} MISO=GP{MISO} CS=GP{CS} INT=GP{INT} IF_SEL=GP{IF_SEL}")
-    print(f"CS_HOLD_US={CS_HOLD_US}, CS_GAP_US={CS_GAP_US}")
+    print(f"CS_HOLD_US={CS_HOLD_US}, CS_GAP_US={CS_GAP_US}, INT_CS_DELAY_US={INT_CS_DELAY_US}")
     print(f"INT_TIMEOUT_MS={INT_TIMEOUT_MS}, RX_TIMEOUT_MS={RX_TIMEOUT_MS}, ACK_TIMEOUT_MS={ACK_TIMEOUT_MS}")
+    print(f"DATA_POLL_WAIT_MS={DATA_POLL_WAIT_MS}, DATA_RX_TIMEOUT_MS={RX_TIMEOUT_MS}, DATA_ACK_TIMEOUT_MS={ACK_TIMEOUT_MS}")
+
+# ----------------------------------------------------------------------
+# Public DATA APIs (With Auto-Print Error)
+# ----------------------------------------------------------------------
+def send_data(payload):
+    """
+    Send raw DATA. Prints error if DEBUG_PRINT is True.
+    """
+    try:
+        ok = data_send(payload, ack_timeout_ms=ACK_TIMEOUT_MS)
+        return {
+            "type": "data_tx",
+            "ok": bool(ok),
+            "len": 0 if payload is None else len(payload),
+            "err_code": SUCCESS,
+            "stage": None,
+        }
+    except S2EError as e:
+        if DEBUG_PRINT:
+            print(f"[TX ERR] {e.stage}: {e} (Code: {e.err_code})")
+        return {
+            "type": "data_tx",
+            "ok": False,
+            "len": 0 if payload is None else len(payload),
+            "err_code": e.err_code,
+            "stage": e.stage,
+            "err": str(e),
+        }
+    except Exception as e:
+        if DEBUG_PRINT:
+            print(f"[TX ERR] System Exception: {e}")
+        return {"type": "data_tx", "ok": False, "len": 0, "err_type": str(type(e)), "err": str(e)}
+
+
+def recv_data():
+    """
+    Receive raw DATA. Prints error if DEBUG_PRINT is True.
+    """
+    try:
+        # data_recv raises S2EError on failure
+        res = data_recv(
+            int_timeout_ms=DATA_POLL_WAIT_MS,
+            rx_timeout_ms=RX_TIMEOUT_MS,
+            scan_max=DATA_SCAN_MAX,
+        )
+
+        if res is None:
+            # No data -> Silent return (Not an error)
+            return {
+                "type": "data_rx",
+                "ok": False,
+                "len": 0,
+                "mv": None,
+                "err_code": None,
+                "stage": "no_int",
+            }
+
+        mv, n = res
+        return {"type": "data_rx", "ok": True, "len": n, "mv": mv, "err_code": SUCCESS, "stage": None}
+
+    except S2EError as e:
+        if DEBUG_PRINT:
+            print(f"[RX ERR] {e.stage}: {e} (Code: {e.err_code})")
+        return {
+            "type": "data_rx",
+            "ok": False,
+            "len": 0,
+            "mv": None,
+            "err_code": e.err_code,
+            "stage": e.stage,
+            "err": str(e),
+        }
+    except Exception as e:
+        if DEBUG_PRINT:
+            print(f"[RX ERR] System Exception: {e}")
+        return {"type": "data_rx", "ok": False, "len": 0, "mv": None, "err_type": str(type(e)), "err": str(e)}

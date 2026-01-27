@@ -8,7 +8,7 @@ import gc
 # -----------------------
 # Pin map / select pin
 # -----------------------
-IF_SEL = 13      # High=SPI, Low=UART
+MODE_SEL = 13      # High=SPI, Low=UART
 
 # -----------------------
 # UART config
@@ -27,6 +27,13 @@ UART_POLL_MS = 10
 # GC config (Run every 30 calls)
 GC_EVERY = 30
 _gc_count = 0
+
+# -----------------------
+# DATA RX buffer (avoid heap alloc on recv)
+# -----------------------
+CAP_MAX = 2048
+_RX_BUF = bytearray(CAP_MAX)
+_RX_MV  = memoryview(_RX_BUF)
 
 # -----------------------
 # HELP
@@ -90,7 +97,7 @@ def print_help():
 # -----------------------
 # UART init
 # -----------------------
-Pin(IF_SEL, Pin.OUT).value(0)   # Select UART mode
+Pin(MODE_SEL, Pin.OUT).value(0)   # Select UART mode
 time.sleep_ms(50)
 
 uart = UART(UART_ID, baudrate=UART_BAUD, tx=Pin(UART_TX), rx=Pin(UART_RX), timeout=10)
@@ -120,12 +127,16 @@ def _read_response():
     return bytes(buf) if buf else None
 
 def _decode_resp_ascii(raw):
-    if raw is None: return None
-    if isinstance(raw, str): return raw
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return raw
+    # MicroPython: no keyword args for errors=...
     return raw.decode("ascii", "ignore")
 
 def _parse_get_value(cmd2, resp_ascii):
-    if not resp_ascii: return None
+    if not resp_ascii:
+        return None
     s = resp_ascii.strip()
     c = (cmd2 or "").strip().upper()
     if len(s) >= 2 and s[:2].upper() == c:
@@ -133,14 +144,24 @@ def _parse_get_value(cmd2, resp_ascii):
     return None
 
 def _is_error_response(resp_ascii):
-    if not resp_ascii: return False
+    if not resp_ascii:
+        return False
     u = resp_ascii.upper()
     return ("ER" in u) or ("ERROR" in u) or ("INVALID" in u)
 
 # -----------------------
-# Public send_cmd() API
+# Public APIs
 # -----------------------
 def send_cmd(at_cmd: str, at_param: str):
+    """
+    UART AT command send.
+    - HELP/? prints help.
+    - SET: cmd+param+CRLF
+    - GET: cmd+CRLF
+    Return dict:
+      - {"type":"get","ok":bool,"value":...,"raw":...}
+      - {"type":"set","ok":bool,"raw":...}
+    """
     global _gc_count
 
     cmd = (at_cmd or "").strip().upper()
@@ -152,7 +173,7 @@ def send_cmd(at_cmd: str, at_param: str):
 
     result = {}
     try:
-        # [Added] Flush: Clear any residual data in the RX buffer before sending a command
+        # Flush stale RX
         while uart.any():
             uart.read()
 
@@ -162,10 +183,7 @@ def send_cmd(at_cmd: str, at_param: str):
             uart.write(line)
             raw = _read_response()
             resp_ascii = _decode_resp_ascii(raw)
-            
-            # SET might not return a response:
-            # - If no response, assume ok=True (adjust policy if needed)
-            # - If response exists, check for error patterns
+
             if resp_ascii is None:
                 ok = True
                 raw_out = None
@@ -194,15 +212,85 @@ def send_cmd(at_cmd: str, at_param: str):
     except Exception as e:
         result = {"type": "error", "ok": False, "error_type": str(type(e)), "error": str(e)}
 
-    # [Modified] Run GC only once every N calls
+    # GC throttled
     if GC_EVERY > 0:
         _gc_count += 1
         if _gc_count >= GC_EVERY:
             gc.collect()
             _gc_count = 0
-            
+
     return result
+
+CAP_MAX = 2048
+_RX_BUF = bytearray(CAP_MAX)
+_RX_MV  = memoryview(_RX_BUF)
+
+# DATA GC config (separate from send_cmd GC)
+DATA_GC_EVERY = 2000   # DATA 루프에서 너무 자주 GC하면 지연 커짐. 적당히 크게.
+_data_gc_cnt = 0
+
+def recv_data_mv():
+    """
+    Non-blocking DATA receive (zero-allocation style).
+    returns: (memoryview, length) or (None, 0)
+
+    - IMPORTANT: memoryview는 _RX_BUF를 그대로 가리킴.
+      다음 recv에서 내용이 덮어써지므로, 바로 처리/전송해야 함.
+    """
+    global _data_gc_cnt
+
+    n = uart.readinto(_RX_BUF)   # no allocation for payload buffer
+    if not n:
+        # GC throttle (even when no data, keep it very light)
+        _data_gc_cnt += 1
+        if DATA_GC_EVERY > 0 and _data_gc_cnt >= DATA_GC_EVERY:
+            gc.collect()
+            _data_gc_cnt = 0
+        return (None, 0)
+
+    # GC throttle (when data exists)
+    _data_gc_cnt += 1
+    if DATA_GC_EVERY > 0 and _data_gc_cnt >= DATA_GC_EVERY:
+        gc.collect()
+        _data_gc_cnt = 0
+
+    return (_RX_MV, n)
+
+
+def send_data(payload, length=None):
+    """
+    UART data send (raw stream).
+    payload: bytes/str/memoryview
+    length: if payload is memoryview, send only first 'length' bytes without making big copies.
+    """
+    if payload is None:
+        return 0
+
+    if isinstance(payload, str):
+        payload = payload.encode("ascii")
+
+    if length is None:
+        return uart.write(payload)
+
+    # length given (typically payload is memoryview)
+    # NOTE: payload[:length] creates a small memoryview object,
+    # but only when real data exists (not every loop).
+    return uart.write(payload[:length])
+
+def recv_data():
+    """
+    Non-blocking DATA receive using pre-allocated buffer (no heap alloc per call).
+    Return dict (SPI-style):
+      {"type":"data_rx","ok":True,"mv":memoryview,"len":n}
+      {"type":"data_rx","ok":False,"mv":None,"len":0}
+    """
+    n = uart.readinto(_RX_BUF)
+    if not n:
+        return {"type": "data_rx", "ok": False, "mv": None, "len": 0}
+    return {"type": "data_rx", "ok": True, "mv": _RX_MV[:n], "len": n}
 
 def print_info():
     print("=== W55RP20-S2E UART AT test ===")
-    print(f"UART{UART_ID} baud={UART_BAUD} TX=GP{UART_TX} RX=GP{UART_RX} IF_SEL=GP{IF_SEL}(LOW=UART)")
+    print(f"UART{UART_ID} baud={UART_BAUD} TX=GP{UART_TX} RX=GP{UART_RX} MODE_SEL=GP{MODE_SEL}(LOW=UART)")
+    print(f"DATA CAP_MAX={CAP_MAX} UART_READ_WINDOW_MS={UART_READ_WINDOW_MS} UART_POLL_MS={UART_POLL_MS} GC_EVERY={GC_EVERY}")
+
