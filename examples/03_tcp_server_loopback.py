@@ -56,19 +56,20 @@ def _wait_for_client_spi(max_ms=SPI_CONNECT_TIMEOUT_MS):
     deadline = time.ticks_add(time.ticks_ms(), max_ms)
 
     while time.ticks_diff(time.ticks_ms(), deadline) < 0:
-        r = s2e.send_cmd("ST", "")
+        ret = s2e.send_cmd("ST", "")
         
-        # Extract value from response dict
-        v = None
-        if isinstance(r, dict):
-            v = r.get("value")
-            if v is None: 
-                v = r.get("raw")
+        # Extract value based on return type (tuple vs dict)
+        val = None
+        if isinstance(ret, tuple): # SPI Driver (new)
+            err, val = ret
+            if err != 0: val = None
+        elif isinstance(ret, dict): # UART Driver (legacy dict)
+            val = ret.get("value")
 
         # Uncomment to debug status polling
-        # print("[ST]", v)
+        # if val: print(f"[ST] {val}")
 
-        if v and ("CONNECT" in str(v).upper()):
+        if val and ("CONNECT" in str(val).upper()):
             print("[ST] Client CONNECTED!")
             return True
 
@@ -93,18 +94,25 @@ def apply_config():
 
     print("[CFG] Applying settings...")
     for c, p in cmds:
-        r = s2e.send_cmd(c, p)
-        print(f"  Set {c}{p} -> {r}")
+        ret = s2e.send_cmd(c, p)
+        
+        # Log result
+        res_str = f"{ret}"
+        if isinstance(ret, tuple):
+            err, _ = ret
+            res_str = "OK" if err == 0 else f"ERR({err})"
+        
+        print(f"  Set {c}{p} -> {res_str}")
         time.sleep_ms(100)
 
     # Save Settings
     print("[CFG] Saving (SV)...")
-    print(" ", s2e.send_cmd("SV", ""))
+    s2e.send_cmd("SV", "") #
     time.sleep_ms(200)
 
     # Reboot Module
     print("[CFG] Rebooting (RT)...")
-    print(" ", s2e.send_cmd("RT", ""))
+    s2e.send_cmd("RT", "") #
 
     # Post-reboot wait
     if MODE == "uart":
@@ -112,15 +120,24 @@ def apply_config():
         time.sleep_ms(UART_AFTER_RT_WAIT_MS)
     else:
         print("[CFG] Waiting 2.0s for SPI boot...")
-        time.sleep_ms(2000)
+        time.sleep_ms(5000)
+
+    # [Server Feature] Check Assigned IP
     print("[CFG] Checking Assigned IP...")
-    r = s2e.send_cmd("LI", "")  # LI: Local IP 조회 명령
+    ret = s2e.send_cmd("LI", "")  # LI: Local IP
     
-    if r.get("ok"):
-        print(f"Server IP: {r.get('value')}")
-        print(f"Port: {LOCAL_PORT}")
+    ip_str = None
+    if isinstance(ret, tuple): # SPI
+        err, val = ret
+        if err == 0: ip_str = val
+    elif isinstance(ret, dict): # UART
+        ip_str = ret.get("value")
+        
+    if ip_str:
+        print(f"  Server IP: {ip_str}")
+        print(f"  Port: {LOCAL_PORT}")
     else:
-        print("Failed to get IP address")
+        print("  Failed to get IP address")
 
 def loopback():
     """Main data loopback routine."""
@@ -132,7 +149,7 @@ def loopback():
     last_log = time.ticks_ms()
     
     # [Config] GC execution interval when idle
-    IDLE_GC_THRESHOLD = 1000 
+    IDLE_GC_THRESHOLD = 5000 
     idle_counter = 0
 
     while True:
@@ -142,37 +159,43 @@ def loopback():
             # --------------------------------------------------
             # UART Mode Loop
             # --------------------------------------------------
-            mv, n = s2e.recv_data_mv()
-            if mv is not None and n > 0:
-                s2e.send_data(mv, n)
-                rx_cnt += 1
-                tx_cnt += 1
-                data_received = True
-            else:
-                miss_cnt += 1
+            # Use recv_data_mv for zero-copy if available
+            try:
+                mv, n = s2e.recv_data_mv() #
+                if mv is not None and n > 0:
+                    # Echo back using length argument to avoid slicing copy
+                    s2e.send_data(mv, length=n) 
+                    rx_cnt += 1
+                    tx_cnt += 1
+                    data_received = True
+                else:
+                    miss_cnt += 1
+            except AttributeError:
+                pass 
 
         else:
             # --------------------------------------------------
             # SPI Mode Loop
             # --------------------------------------------------
-            rx = s2e.recv_data()
+            ret = s2e.recv_data() #
             
-            # Check if reception was successful
-            if rx.get("ok"):
-                mv = rx.get("mv")
-                n = int(rx.get("len", 0))
-                
-                if mv is not None and n > 0:
-                    # Echo back the data
-                    tx = s2e.send_data(mv[:n])
-                    
-                    if tx.get("ok"):
+            # Case 1: Success Tuple (mv, n)
+            if isinstance(ret, tuple):
+                mv, n = ret
+                if n > 0:
+                    # Echo back
+                    err = s2e.send_data(mv[:n])
+                    if err == 0: # SUCCESS
                         rx_cnt += 1
                         tx_cnt += 1
                         data_received = True
-            else:
-                if rx.get("err_code") is None:
-                    miss_cnt += 1
+            
+            # Case 2: Error Code (int)
+            elif isinstance(ret, int):
+                # ret < 0 means error
+                miss_cnt += 1
+                
+            # Case 3: None (No Data) -> Do nothing
 
         # --------------------------------------------------
         # [Core] Smart Garbage Collection
@@ -195,21 +218,22 @@ def loopback():
             miss_cnt = 0
 
         # Yield CPU
-        time.sleep_ms(2)
+        if MODE == "uart":
+            time.sleep_ms(2)
 
 def main():
     if PRINT_INFO:
-        s2e.print_info()
+        try: s2e.print_info()
+        except: pass
     if PRINT_HELP:
-        s2e.print_help()
+        try: s2e.print_help()
+        except: pass
 
     # 1. Setup
     apply_config()
 
     # 2. Wait for Connection (SPI only)
     if MODE == "spi":
-        # 서버는 클라이언트가 접속할 때까지 무한정 기다리거나 타임아웃을 둡니다.
-        # 타임아웃 내에 접속이 없으면 종료하거나 다시 기다릴 수 있습니다.
         if not _wait_for_client_spi():
             print("[ERR] No client connected within timeout.")
             return
