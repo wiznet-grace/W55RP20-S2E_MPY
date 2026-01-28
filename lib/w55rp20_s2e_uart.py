@@ -1,9 +1,10 @@
 # w55rp20_s2e_uart.py
 # W55RP20-S2E UART Master (MicroPython / RP2040 Pico)
+# [Zero-Copy Version] Optimized return types (int/tuple) to prevent GC.
+# Aligned API with SPI driver for consistency.
 
 from machine import UART, Pin
 import time
-import gc
 
 # -----------------------
 # Pin map / select pin
@@ -24,9 +25,12 @@ UART_RX = 5      # GP5
 UART_READ_WINDOW_MS = 200
 UART_POLL_MS = 10
 
-# GC config (Run every 30 calls)
-GC_EVERY = 30
-_gc_count = 0
+# -----------------------
+# Error Codes (Synced with SPI)
+# -----------------------
+SUCCESS = 0
+ERR_TIMEOUT = -2
+ERR_UNKNOWN = -99
 
 # -----------------------
 # DATA RX buffer (avoid heap alloc on recv)
@@ -155,113 +159,71 @@ def _is_error_response(resp_ascii):
 def send_cmd(at_cmd: str, at_param: str):
     """
     UART AT command send.
-    - HELP/? prints help.
-    - SET: cmd+param+CRLF
-    - GET: cmd+CRLF
-    Return dict:
-      - {"type":"get","ok":bool,"value":...,"raw":...}
-      - {"type":"set","ok":bool,"raw":...}
+    Returns tuple: (error_code, value)
+      - Success: (0, value) or (0, None)
+      - Failure: (negative_int, None)
     """
-    global _gc_count
-
     cmd = (at_cmd or "").strip().upper()
     param = at_param or ""
 
     if cmd in ("HELP", "?"):
         print_help()
-        return {"type": "help", "ok": True}
+        return (SUCCESS, None)
 
-    result = {}
     try:
         # Flush stale RX
         while uart.any():
             uart.read()
 
         if param:
-            # SET
+            # SET Command
             line = (cmd + param + "\r\n").encode("ascii")
             uart.write(line)
             raw = _read_response()
             resp_ascii = _decode_resp_ascii(raw)
 
             if resp_ascii is None:
-                ok = True
-                raw_out = None
+                # No response (might be okay for some cmds, or timeout)
+                return (SUCCESS, None) 
             else:
-                ok = not _is_error_response(resp_ascii)
-                raw_out = resp_ascii.strip()
-            result = {"type": "set", "ok": bool(ok), "raw": raw_out}
+                if _is_error_response(resp_ascii):
+                    return (ERR_UNKNOWN, None)
+                # For SET, we usually just return Success
+                return (SUCCESS, None) 
         else:
-            # GET
+            # GET Command
             line = (cmd + "\r\n").encode("ascii")
             uart.write(line)
             raw = _read_response()
             resp_ascii = _decode_resp_ascii(raw)
 
             if not resp_ascii:
-                result = {"type": "get", "ok": False, "value": None, "raw": None}
-            else:
-                value = _parse_get_value(cmd, resp_ascii)
-                result = {
-                    "type": "get",
-                    "ok": value is not None,
-                    "value": value,
-                    "raw": resp_ascii.strip(),
-                }
+                return (ERR_TIMEOUT, None)
+            
+            value = _parse_get_value(cmd, resp_ascii)
+            if value is None:
+                return (ERR_UNKNOWN, resp_ascii.strip()) # Return raw if parse failed
+            
+            return (SUCCESS, value)
 
     except Exception as e:
-        result = {"type": "error", "ok": False, "error_type": str(type(e)), "error": str(e)}
-
-    # GC throttled
-    if GC_EVERY > 0:
-        _gc_count += 1
-        if _gc_count >= GC_EVERY:
-            gc.collect()
-            _gc_count = 0
-
-    return result
-
-CAP_MAX = 2048
-_RX_BUF = bytearray(CAP_MAX)
-_RX_MV  = memoryview(_RX_BUF)
-
-# DATA GC config (separate from send_cmd GC)
-DATA_GC_EVERY = 2000   # DATA 루프에서 너무 자주 GC하면 지연 커짐. 적당히 크게.
-_data_gc_cnt = 0
+        print(f"[UART ERR] {e}")
+        return (ERR_UNKNOWN, None)
 
 def recv_data_mv():
     """
-    Non-blocking DATA receive (zero-allocation style).
-    returns: (memoryview, length) or (None, 0)
-
-    - IMPORTANT: memoryview는 _RX_BUF를 그대로 가리킴.
-      다음 recv에서 내용이 덮어써지므로, 바로 처리/전송해야 함.
+    Non-blocking DATA receive (Zero-Copy).
+    returns: (memoryview, length)
     """
-    global _data_gc_cnt
-
-    n = uart.readinto(_RX_BUF)   # no allocation for payload buffer
+    n = uart.readinto(_RX_BUF)   # No allocation
     if not n:
-        # GC throttle (even when no data, keep it very light)
-        _data_gc_cnt += 1
-        if DATA_GC_EVERY > 0 and _data_gc_cnt >= DATA_GC_EVERY:
-            gc.collect()
-            _data_gc_cnt = 0
         return (None, 0)
-
-    # GC throttle (when data exists)
-    _data_gc_cnt += 1
-    if DATA_GC_EVERY > 0 and _data_gc_cnt >= DATA_GC_EVERY:
-        gc.collect()
-        _data_gc_cnt = 0
-
     return (_RX_MV, n)
-
 
 def send_data(payload, length=None):
     """
-    UART data send (raw stream).
-    payload: bytes/str/memoryview
-    length: if payload is memoryview, send only first 'length' bytes without making big copies.
+    UART data send.
+    Returns: 0 on Success (to match SPI driver signature)
     """
     if payload is None:
         return 0
@@ -270,27 +232,24 @@ def send_data(payload, length=None):
         payload = payload.encode("ascii")
 
     if length is None:
-        return uart.write(payload)
-
-    # length given (typically payload is memoryview)
-    # NOTE: payload[:length] creates a small memoryview object,
-    # but only when real data exists (not every loop).
-    return uart.write(payload[:length])
+        uart.write(payload)
+    else:
+        uart.write(payload[:length])
+        
+    return SUCCESS # Always success for UART unless exception
 
 def recv_data():
     """
-    Non-blocking DATA receive using pre-allocated buffer (no heap alloc per call).
-    Return dict (SPI-style):
-      {"type":"data_rx","ok":True,"mv":memoryview,"len":n}
-      {"type":"data_rx","ok":False,"mv":None,"len":0}
+    Legacy wrapper for compatibility with SPI driver structure.
+    Returns: (mv, n) or None
     """
-    n = uart.readinto(_RX_BUF)
-    if not n:
-        return {"type": "data_rx", "ok": False, "mv": None, "len": 0}
-    return {"type": "data_rx", "ok": True, "mv": _RX_MV[:n], "len": n}
+    # Just redirect to optimized version
+    mv, n = recv_data_mv()
+    if n > 0:
+        return (mv, n)
+    return None
 
 def print_info():
-    print("=== W55RP20-S2E UART AT test ===")
-    print(f"UART{UART_ID} baud={UART_BAUD} TX=GP{UART_TX} RX=GP{UART_RX} MODE_SEL=GP{MODE_SEL}(LOW=UART)")
-    print(f"DATA CAP_MAX={CAP_MAX} UART_READ_WINDOW_MS={UART_READ_WINDOW_MS} UART_POLL_MS={UART_POLL_MS} GC_EVERY={GC_EVERY}")
-
+    print("=== W55RP20-S2E UART Master ===")
+    print(f"UART{UART_ID} baud={UART_BAUD} TX=GP{UART_TX} RX=GP{UART_RX}")
+    print(f"Buffer CAP_MAX={CAP_MAX}")

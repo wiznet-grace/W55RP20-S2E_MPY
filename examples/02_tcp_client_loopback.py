@@ -10,7 +10,7 @@ import gc  # Required for manual memory management
 # -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-MODE = "spi"   # Set to "spi" or "uart"
+MODE = "uart"   # Set to "spi" or "uart"
 
 REMOTE_IP   = "192.168.11.2"
 REMOTE_PORT = "5000"
@@ -19,9 +19,10 @@ REMOTE_PORT = "5000"
 PRINT_INFO = True
 PRINT_HELP = False
 
+AFTER_RT_WAIT_MS = 5000
+
 # Timing constants
 UART_GUARD_MS = 600
-UART_AFTER_RT_WAIT_MS = 7000
 
 # SPI specific constants
 SPI_CONNECT_TIMEOUT_MS = 20000
@@ -114,11 +115,11 @@ def apply_config():
 
     # Post-reboot wait
     if MODE == "uart":
-        print(f"[CFG] Waiting {UART_AFTER_RT_WAIT_MS/1000}s for UART boot/connect...")
-        time.sleep_ms(UART_AFTER_RT_WAIT_MS)
+        print(f"[CFG] Waiting {AFTER_RT_WAIT_MS/1000}s for UART boot/connect...")
+        time.sleep_ms(AFTER_RT_WAIT_MS)
     else:
-        print("[CFG] Waiting 2.0s for SPI boot...")
-        time.sleep_ms(2000)
+        print(f"[CFG] Waiting {AFTER_RT_WAIT_MS/1000}s for SPI boot/connect...")
+        time.sleep_ms(AFTER_RT_WAIT_MS)
 
 def loopback():
     """Main data loopback routine."""

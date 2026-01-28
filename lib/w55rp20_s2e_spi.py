@@ -299,11 +299,6 @@ def send_cmd(at_cmd: str, at_param: str):
         if DEBUG_PRINT: print(f"[CMD ERR] {e}")
         return (ERR_UNKNOWN, None)
 
-def print_info():
-    print("=== W55RP20-S2E SPI AT GET/SET test ===")
-    print(f"SPI{SPI_ID} baud={SPI_BAUD} POL={POL} PHA={PHA}")
-    print(f"CS_HOLD_US={CS_HOLD_US}, CS_GAP_US={CS_GAP_US}, INT_CS_DELAY_US={INT_CS_DELAY_US}")
-
 def send_data(payload):
     """
     Returns integer error code.
@@ -342,3 +337,9 @@ def recv_data():
     except Exception as e:
         if DEBUG_PRINT: print(f"[RX ERR] System Exception: {e}")
         return ERR_UNKNOWN
+
+def print_info():
+    print("=== W55RP20-S2E SPI Master===")
+    print(f"SPI{SPI_ID} baud={SPI_BAUD} POL={POL} PHA={PHA}")
+    print(f"CS_HOLD_US={CS_HOLD_US}, CS_GAP_US={CS_GAP_US}, INT_CS_DELAY_US={INT_CS_DELAY_US}")
+

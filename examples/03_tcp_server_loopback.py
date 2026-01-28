@@ -13,7 +13,7 @@ import gc  # Required for manual memory management
 # -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-MODE = "spi"   # Set to "spi" or "uart"
+MODE = "uart"   # Set to "spi" or "uart"
 
 LOCAL_PORT = "5000"  # Port to listen on
 
@@ -22,8 +22,8 @@ PRINT_INFO = True
 PRINT_HELP = False
 
 # Timing constants
-UART_GUARD_MS = 600
-UART_AFTER_RT_WAIT_MS = 7000
+UART_GUARD_MS = 1000
+AFTER_RT_WAIT_MS = 7000
 
 # SPI specific constants
 SPI_CONNECT_TIMEOUT_MS = 60000  # Server might wait longer for a client
@@ -48,6 +48,11 @@ def _enter_at_mode_uart():
     s2e.send_data("+++")
     time.sleep_ms(UART_GUARD_MS)
 
+def _exit_at_mode_uart():
+    """Exit AT command mode for UART (Send 'EX')."""
+    s2e.send_cmd("EX", "")
+    time.sleep_ms(200)
+
 def _wait_for_client_spi(max_ms=SPI_CONNECT_TIMEOUT_MS):
     """
     SPI Only: Poll ST command until a Client connects ('CONNECT' status).
@@ -56,20 +61,9 @@ def _wait_for_client_spi(max_ms=SPI_CONNECT_TIMEOUT_MS):
     deadline = time.ticks_add(time.ticks_ms(), max_ms)
 
     while time.ticks_diff(time.ticks_ms(), deadline) < 0:
-        ret = s2e.send_cmd("ST", "")
+        err, val = s2e.send_cmd("ST", "")
         
-        # Extract value based on return type (tuple vs dict)
-        val = None
-        if isinstance(ret, tuple): # SPI Driver (new)
-            err, val = ret
-            if err != 0: val = None
-        elif isinstance(ret, dict): # UART Driver (legacy dict)
-            val = ret.get("value")
-
-        # Uncomment to debug status polling
-        # if val: print(f"[ST] {val}")
-
-        if val and ("CONNECT" in str(val).upper()):
+        if err == 0 and val and ("CONNECT" in str(val).upper()):
             print("[ST] Client CONNECTED!")
             return True
 
@@ -94,50 +88,58 @@ def apply_config():
 
     print("[CFG] Applying settings...")
     for c, p in cmds:
-        ret = s2e.send_cmd(c, p)
-        
-        # Log result
-        res_str = f"{ret}"
-        if isinstance(ret, tuple):
-            err, _ = ret
-            res_str = "OK" if err == 0 else f"ERR({err})"
-        
+        err, val = s2e.send_cmd(c, p)
+        res_str = "OK" if err == 0 else f"ERR({err})"
         print(f"  Set {c}{p} -> {res_str}")
         time.sleep_ms(100)
 
     # Save Settings
     print("[CFG] Saving (SV)...")
-    s2e.send_cmd("SV", "") #
+    s2e.send_cmd("SV", "")
     time.sleep_ms(200)
 
     # Reboot Module
     print("[CFG] Rebooting (RT)...")
-    s2e.send_cmd("RT", "") #
+    s2e.send_cmd("RT", "")
 
     # Post-reboot wait
     if MODE == "uart":
-        print(f"[CFG] Waiting {UART_AFTER_RT_WAIT_MS/1000}s for UART boot...")
-        time.sleep_ms(UART_AFTER_RT_WAIT_MS)
-    else:
-        print("[CFG] Waiting 2.0s for SPI boot...")
-        time.sleep_ms(5000)
-
-    # [Server Feature] Check Assigned IP
-    print("[CFG] Checking Assigned IP...")
-    ret = s2e.send_cmd("LI", "")  # LI: Local IP
-    
-    ip_str = None
-    if isinstance(ret, tuple): # SPI
-        err, val = ret
-        if err == 0: ip_str = val
-    elif isinstance(ret, dict): # UART
-        ip_str = ret.get("value")
+        print(f"[CFG] Waiting {AFTER_RT_WAIT_MS/1000}s for UART boot...")
+        time.sleep_ms(AFTER_RT_WAIT_MS)
         
-    if ip_str:
-        print(f"  Server IP: {ip_str}")
-        print(f"  Port: {LOCAL_PORT}")
+        # The module returns to Data Mode after reboot.
+        # We must re-enter AT mode to query the IP address.
+        print("[CFG] Re-entering AT mode to check IP...")
+        _enter_at_mode_uart()
     else:
-        print("  Failed to get IP address")
+        print(f"[CFG] Waiting {AFTER_RT_WAIT_MS/1000}s for SPI boot...")
+        time.sleep_ms(AFTER_RT_WAIT_MS)
+
+    # Check Assigned IP (DHCP)
+    print("[CFG] Checking Assigned IP (max 10s)...")
+    
+    got_ip = False
+    for i in range(10):
+        err, val = s2e.send_cmd("LI", "")  # LI: Local IP
+        
+        ip_str = val if err == 0 else None
+            
+        if ip_str and ip_str != "0.0.0.0":
+            print(f"Server IP Assigned: {ip_str}")
+            print(f"Port: {LOCAL_PORT}")
+            got_ip = True
+            break
+        
+        print(f"  [{i+1}/10] Waiting for IP... (Current: {ip_str})")
+        time.sleep(1)
+
+    if not got_ip:
+        print("Warning: DHCP failed or timed out. IP is still 0.0.0.0")
+
+    # Exit AT mode to start data loopback (Data Mode)
+    if MODE == "uart":
+        print("[CFG] Exiting AT mode (EX) to start data loopback...")
+        _exit_at_mode_uart()
 
 def loopback():
     """Main data loopback routine."""
@@ -159,25 +161,22 @@ def loopback():
             # --------------------------------------------------
             # UART Mode Loop
             # --------------------------------------------------
-            # Use recv_data_mv for zero-copy if available
-            try:
-                mv, n = s2e.recv_data_mv() #
-                if mv is not None and n > 0:
-                    # Echo back using length argument to avoid slicing copy
-                    s2e.send_data(mv, length=n) 
-                    rx_cnt += 1
-                    tx_cnt += 1
-                    data_received = True
-                else:
-                    miss_cnt += 1
-            except AttributeError:
-                pass 
+            # Use recv_data_mv for zero-copy
+            mv, n = s2e.recv_data_mv()
+            if mv is not None and n > 0:
+                # Echo back using length argument to avoid slicing copy
+                s2e.send_data(mv, length=n) 
+                rx_cnt += 1
+                tx_cnt += 1
+                data_received = True
+            else:
+                miss_cnt += 1
 
         else:
             # --------------------------------------------------
             # SPI Mode Loop
             # --------------------------------------------------
-            ret = s2e.recv_data() #
+            ret = s2e.recv_data()
             
             # Case 1: Success Tuple (mv, n)
             if isinstance(ret, tuple):
