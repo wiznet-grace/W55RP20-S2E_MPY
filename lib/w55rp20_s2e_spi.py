@@ -119,6 +119,7 @@ def wait_ack(timeout_ms: int = 1500, max_bytes: int = 4096):
             xfer_byte(DUMMY); xfer_byte(DUMMY); xfer_byte(DUMMY)
             return True
         if b == NACK:
+            xfer_byte(DUMMY); xfer_byte(DUMMY); xfer_byte(DUMMY)
             return False
     return None
 
@@ -134,6 +135,7 @@ def read_b1_payload_status(timeout_ms: int = 2000, scan_max: int = 8192):
         scanned += 1
 
         if b == NACK:
+            xfer_byte(DUMMY); xfer_byte(DUMMY); xfer_byte(DUMMY)
             return (None, 0, ERR_NACK, "wait_b1")
 
         if b == RSP_B1:
