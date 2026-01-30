@@ -1,9 +1,9 @@
-# 03_tcp_server_loopback.py
+# 04_udp_loopback.py
 #
-# TCP Server loopback example (Supports both SPI and UART modes):
-# - Configure the module as TCP Server + DHCP
-# - Local Port: 5000
-# - Waits for a client to connect, then echoes back received data.
+# UDP Loopback example (Supports both SPI and UART modes):
+# - Configure the module as UDP Mode (OP=3) + DHCP
+# - Local Port: 5000 (Listening)
+# - Remote Host/Port: Destination for echoed data (Must match PC's IP)
 #
 # Select mode by changing the MODE variable below.
 
@@ -13,9 +13,13 @@ import gc  # Required for manual memory management
 # -------------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------------
-MODE = "uart"   # Set to "spi" or "uart"
+MODE = "spi"   # Set to "spi" or "uart"
 
-LOCAL_PORT = "5000"  # Port to listen on
+# [UDP Configuration]
+# UDP is connectionless. You MUST specify the destination IP (Your PC).
+LOCAL_PORT  = "5000"          # Port to listen on (Pico)
+REMOTE_IP   = "192.168.11.2"  # Destination IP (PC's IP) - CHANGE THIS!
+REMOTE_PORT = "5000"          # Destination Port (PC's Port)
 
 # Printing flags
 PRINT_INFO = True
@@ -23,11 +27,7 @@ PRINT_HELP = False
 
 # Timing constants
 UART_GUARD_MS = 1000
-AFTER_RT_WAIT_MS = 7000
-
-# SPI specific constants
-SPI_CONNECT_TIMEOUT_MS = 60000  # Server might wait longer for a client
-SPI_ST_POLL_MS = 500
+AFTER_RT_WAIT_MS = 5000
 
 # -------------------------------------------------------------------------
 # Driver Import
@@ -51,45 +51,35 @@ def _enter_at_mode_uart():
 def _exit_at_mode_uart():
     """Exit AT command mode for UART (Send 'EX')."""
     s2e.send_cmd("EX", "")
-    time.sleep_ms(UART_GUARD_MS)
-
-def _wait_for_client_spi(max_ms=SPI_CONNECT_TIMEOUT_MS):
-    """
-    SPI Only: Poll ST command until a Client connects ('CONNECT' status).
-    """
-    print(f"[SRV] Waiting for client connection on port {LOCAL_PORT}...")
-    deadline = time.ticks_add(time.ticks_ms(), max_ms)
-
-    while time.ticks_diff(time.ticks_ms(), deadline) < 0:
-        err, val = s2e.send_cmd("ST", "")
-        
-        if err == 0 and val and ("CONNECT" in str(val).upper()):
-            print("[ST] Client CONNECTED!")
-            return True
-
-        time.sleep_ms(SPI_ST_POLL_MS)
-
-    print("[ST] Timeout: No client connected.")
-    return False
+    time.sleep_ms(200)
 
 def apply_config():
     """Configure the module using AT commands."""
     cmds = [
-        ("OP", "1"),            # TCP Server Mode (0:Client, 1:Server)
+        ("OP", "3"),            # UDP Mode (3: UDP)
         ("IM", "1"),            # DHCP Mode
-        ("LP", LOCAL_PORT),     # Local Port to Listen
+        ("LP", LOCAL_PORT),     # Local Port (Listening)
+        ("RH", REMOTE_IP),      # Remote Host IP (Destination)
+        ("RP", REMOTE_PORT),    # Remote Port (Destination)
         ("DG", "1"),            # Debug Message Enable
     ]
 
+    # UART Specific Settings: Apply Packet Time (PT)
     # For UART, we must explicitly enter AT mode first
     if MODE == "uart":
+        cmds.append(("PT", "10")) # Packet Time: 10ms
         print("[CFG] Entering AT mode (UART)...")
         _enter_at_mode_uart()
 
-    print("[CFG] Applying settings...")
+    print("[CFG] Applying UDP settings...")
     for c, p in cmds:
-        err, val = s2e.send_cmd(c, p)
-        res_str = "OK" if err == 0 else f"ERR({err})"
+        # Tuple return handling (err, val)
+        ret = s2e.send_cmd(c, p)
+        res_str = f"{ret}"
+        if isinstance(ret, tuple):
+            err, val = ret
+            res_str = "OK" if err == 0 else f"ERR({err})"
+        
         print(f"  Set {c}{p} -> {res_str}")
         time.sleep_ms(100)
 
@@ -120,13 +110,19 @@ def apply_config():
     
     got_ip = False
     for i in range(10):
-        err, val = s2e.send_cmd("LI", "")  # LI: Local IP
+        ret = s2e.send_cmd("LI", "")  # LI: Local IP
         
-        ip_str = val if err == 0 else None
-            
+        ip_str = None
+        if isinstance(ret, tuple):
+            err, val = ret
+            if err == 0: ip_str = val
+        elif isinstance(ret, dict):
+             ip_str = ret.get("value")
+
         if ip_str and ip_str != "0.0.0.0":
             print(f"Server IP Assigned: {ip_str}")
-            print(f"Port: {LOCAL_PORT}")
+            print(f"Listening Port: {LOCAL_PORT}")
+            print(f"Target PC: {REMOTE_IP}:{REMOTE_PORT}")
             got_ip = True
             break
         
@@ -143,7 +139,7 @@ def apply_config():
 
 def loopback():
     """Main data loopback routine."""
-    print(f"[LOOP] Start TCP Server loopback ({MODE.upper()} DATA)")
+    print(f"[LOOP] Start UDP loopback ({MODE.upper()} DATA)")
 
     rx_cnt = 0
     tx_cnt = 0
@@ -151,7 +147,8 @@ def loopback():
     last_log = time.ticks_ms()
     
     # [Config] GC execution interval when idle
-    IDLE_GC_THRESHOLD = 5000 
+    # Since the loop sleeps for 2ms, 1000 iterations equal approx. 2 seconds.
+    IDLE_GC_THRESHOLD = 1000 
     idle_counter = 0
 
     while True:
@@ -198,6 +195,7 @@ def loopback():
 
         # --------------------------------------------------
         # [Core] Smart Garbage Collection
+        # Counts only when idle (no data) and cleans up occasionally.
         # --------------------------------------------------
         if data_received:
             idle_counter = 0
@@ -212,7 +210,7 @@ def loopback():
         # --------------------------------------------------
         now = time.ticks_ms()
         if time.ticks_diff(now, last_log) >= 1000:
-            # print(f"[STAT] rx={rx_cnt}, tx={tx_cnt}")
+            # print(f"[STAT] rx={rx_cnt}, tx={tx_cnt}, miss={miss_cnt}")
             last_log = now
             miss_cnt = 0
 
@@ -230,14 +228,8 @@ def main():
 
     # 1. Setup
     apply_config()
-
-    # 2. Wait for Connection (SPI only)
-    if MODE == "spi":
-        if not _wait_for_client_spi():
-            print("[ERR] No client connected within timeout.")
-            return
-
-    # 3. Start Loopback
+    
+    # 2. Start Loopback (UDP is connectionless, no waiting)
     loopback()
 
 if __name__ == "__main__":
