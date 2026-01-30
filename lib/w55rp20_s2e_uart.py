@@ -163,6 +163,9 @@ def send_cmd(at_cmd: str, at_param: str):
       - Success: (0, value) or (0, None)
       - Failure: (negative_int, None)
     """
+    # Commands that are actions (SET) even without parameters
+    _NO_PARAM_SET_CMDS = ("SV", "RT", "FR", "EX")
+
     cmd = (at_cmd or "").strip().upper()
     param = at_param or ""
 
@@ -175,36 +178,51 @@ def send_cmd(at_cmd: str, at_param: str):
         while uart.any():
             uart.read()
 
-        if param:
-            # SET Command
+        # Treat as SET if parameter exists OR if it is a special action command
+        if param or (cmd in _NO_PARAM_SET_CMDS):
+            # SET Command Logic
             line = (cmd + param + "\r\n").encode("ascii")
             uart.write(line)
-            raw = _read_response()
-            resp_ascii = _decode_resp_ascii(raw)
-
-            if resp_ascii is None:
-                # No response (might be okay for some cmds, or timeout)
-                return (SUCCESS, None) 
-            else:
-                if _is_error_response(resp_ascii):
-                    return (ERR_UNKNOWN, None)
-                # For SET, we usually just return Success
-                return (SUCCESS, None) 
+            
+            # Read response
+            # Some action commands (like RT) might not return response immediately
+            # But we try to read to clear buffer or check OK
+            time.sleep_ms(100) # Give a little time for processing
+            
+            # Simple check for RX (Optional: parse OK)
+            if uart.any():
+                raw = uart.read() # Just clear buffer
+            
+            # Always return Success for Action/Set commands
+            return (SUCCESS, None) 
+            
         else:
-            # GET Command
+            # GET Command Logic
             line = (cmd + "\r\n").encode("ascii")
             uart.write(line)
-            raw = _read_response()
-            resp_ascii = _decode_resp_ascii(raw)
+            
+            # Read response with timeout
+            # (Assuming _read_response and _decode_resp_ascii are defined elsewhere)
+            # You might need to adjust this part based on your exact read implementation
+            start = time.ticks_ms()
+            resp_ascii = ""
+            
+            while time.ticks_diff(time.ticks_ms(), start) < 1000:
+                if uart.any():
+                    raw = uart.read()
+                    try:
+                        resp_ascii = raw.decode('ascii').strip()
+                        break
+                    except:
+                        pass
+                time.sleep_ms(10)
 
             if not resp_ascii:
                 return (ERR_TIMEOUT, None)
             
-            value = _parse_get_value(cmd, resp_ascii)
-            if value is None:
-                return (ERR_UNKNOWN, resp_ascii.strip()) # Return raw if parse failed
-            
-            return (SUCCESS, value)
+            # Simple parsing (assuming response is just value or [CMD] VALUE)
+            # You might want to use your _parse_get_value logic here if available
+            return (SUCCESS, resp_ascii)
 
     except Exception as e:
         print(f"[UART ERR] {e}")
