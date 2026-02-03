@@ -15,6 +15,15 @@ import gc  # Required for manual memory management
 # -------------------------------------------------------------------------
 MODE = "spi"   # Set to "spi" or "uart"
 
+# IP Configuration Mode
+USE_DHCP = True  # True: DHCP (IM=1), False: Static IP (IM=0)
+
+# Network Configuration
+LOCAL_IP    = "192.168.11.100"  # Local IP (Used when USE_DHCP=False)
+SUBNET_MASK = "255.255.255.0"   # Subnet Mask (Used when USE_DHCP=False)
+GATEWAY     = "192.168.11.1"    # Gateway (Used when USE_DHCP=False)
+DNS_SERVER  = "8.8.8.8"         # DNS Server (Used when USE_DHCP=False)
+
 # [UDP Configuration]
 # UDP is connectionless. You MUST specify the destination IP (Your PC).
 LOCAL_PORT  = "5000"          # Port to listen on (Pico)
@@ -55,14 +64,25 @@ def _exit_at_mode_uart():
 
 def apply_config():
     """Configure the module using AT commands."""
+    ip_mode = "1" if USE_DHCP else "0"
+    
     cmds = [
         ("OP", "3"),            # UDP Mode (3: UDP)
-        ("IM", "1"),            # DHCP Mode
+        ("IM", ip_mode),        # IP Mode (0:Static, 1:DHCP)
         ("LP", LOCAL_PORT),     # Local Port (Listening)
         ("RH", REMOTE_IP),      # Remote Host IP (Destination)
         ("RP", REMOTE_PORT),    # Remote Port (Destination)
         ("DG", "1"),            # Debug Message Enable
     ]
+    
+    # Add Static IP settings if not using DHCP
+    if not USE_DHCP:
+        cmds.extend([
+            ("LI", LOCAL_IP),
+            ("SM", SUBNET_MASK),
+            ("GW", GATEWAY),
+            ("DS", DNS_SERVER),
+        ])
 
     # UART Specific Settings: Apply Packet Time (PT)
     # For UART, we must explicitly enter AT mode first
@@ -219,12 +239,8 @@ def loopback():
             time.sleep_ms(2)
 
 def main():
-    if PRINT_INFO:
-        try: s2e.print_info()
-        except: pass
-    if PRINT_HELP:
-        try: s2e.print_help()
-        except: pass
+    s2e.print_info()
+    # s2e.print_help()
 
     # 1. Setup
     apply_config()
