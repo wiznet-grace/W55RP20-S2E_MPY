@@ -19,26 +19,23 @@ W55RP20-S2E_MPY/
 │
 └── examples/                     # [Apps] 실행 예제
     ├── 01_at_cmd_tester.py              # (Active) 기본 AT 명령 테스트
-    ├── 02_loopback_tcp_client.py # (추가 예정)
-    ├── 03_loopback_tcp_server.py # (추가 예정)
-    ├── 04_loopback_udp.py        # (추가 예정)
-    ├── 05_http_server.py         # (추가 예정)
-    ├── 06_ssl_client.py          # (추가 예정)
-    ├── 07_mqtt_client.py         # (추가 예정)
-    └── 08_aws_iot_mqtt.py        # (추가 예정)
+    ├── 02_tcp_client_loopback.py        # (Active) TCP 클라이언트 루프백
+    ├── 03_tcp_server_loopback.py        # (Active) TCP 서버 루프백
+    ├── 04_udp_loopback.py               # (Active) UDP 루프백
+    ├── 05_http_client.py                # (Active) HTTP GET 요청
+    └── 06_webserver.py                  # (Active) 웹 서버
 ```
 
 ### 2. 예제 파일 상세 (Example Files)
 | 파일명 (File) | 상태 (Status) | 설명 (Description) |
 | :--- | :--- | :--- |
 | **`01_at_cmd_tester.py`** | **Active** | • **기본 예제:** AT 커맨드 전송 및 응답 확인<br>• **모드 선택:** SPI/UART 설정 가능<br>• **안전장치:** `try-except` 적용됨 |
-| `02_loopback_tcp_client.py` | *추가 예정* | TCP 서버 루프백 예제 |
-| `03_loopback_tcp_server.py` | *추가 예정* | TCP 클라이언트 루프백 예제 |
-| `04_loopback_udp.py` | *추가 예정* | UDP 통신 예제 |
-| `05_http_server.py` | *추가 예정* | 웹 서버 구동 예제 |
-| `06_ssl_client.py` | *추가 예정* | SSL/TLS 보안 접속 예제 |
-| `07_mqtt_client.py` | *추가 예정* | MQTT 통신 예제 |
-| `08_aws_iot_mqtt.py` | *추가 예정* | AWS IoT Core 연동 예제 |
+| **`02_tcp_client_loopback.py`** | **Active** | • TCP 클라이언트 루프백<br>• UART 모드 예제 |
+| **`02_tcp_client_loopback_spi.py`** | **Active** | • TCP 클라이언트 루프백<br>• SPI 모드 예제 |
+| **`03_tcp_server_loopback.py`** | **Active** | • TCP 서버 루프백<br>• SPI/UART 지원 |
+| **`04_udp_loopback.py`** | **Active** | • UDP 루프백 통신<br>• SPI/UART 지원 |
+| **`05_http_client.py`** | **Active** | • HTTP GET 요청 예제<br>• httpbin.org 테스트<br>• SPI/UART 지원 |
+| **`06_webserver.py`** | **Active** | • 웹 서버 예제<br>• TCP Server 모드<br>• HTML 응답 전송<br>• SPI/UART 지원 |
 
 ### 3. 하드웨어 구성 (Pin Configuration)
 
@@ -80,26 +77,24 @@ W55RP20-S2E_MPY/
 │
 └── examples/                     # [Apps] Example Applications
     ├── 01_at_cmd_tester.py              # (Active) Basic AT Command Test
-    ├── 02_loopback_tcp_client.py # (Planned)
-    ├── 03_loopback_tcp_server.py # (Planned)
-    ├── 04_loopback_udp.py        # (Planned)
-    ├── 05_http_server.py         # (Planned)
-    ├── 06_ssl_client.py          # (Planned)
-    ├── 07_mqtt_client.py         # (Planned)
-    └── 08_aws_iot_mqtt.py        # (Planned)
+    ├── 02_tcp_client_loopback_spi.py    # (Active) TCP Client Loopback (SPI)
+    ├── 02_tcp_client_loopback.py        # (Active) TCP Client Loopback (UART)
+    ├── 03_tcp_server_loopback.py        # (Active) TCP Server Loopback
+    ├── 04_udp_loopback.py               # (Active) UDP Loopback
+    ├── 05_http_client.py                # (Active) HTTP GET Request
+    └── 06_webserver.py                  # (Active) Web Server
 ```
 
 ### 2. Example Files List
 | File Name | Status | Description |
 | :--- | :--- | :--- |
 | **`01_at_cmd_tester.py`** | **Active** | • **Basic:** Sends AT commands & checks responses<br>• **Mode:** Supports SPI/UART selection<br>• **Safety:** Includes `try-except` logic |
-| `02_loopback_tcp_client.py` | *Planned* | TCP Server Loopback |
-| `03_loopback_tcp_server.py` | *Planned* | TCP Client Loopback |
-| `04_loopback_udp.py` | *Planned* | UDP Communication |
-| `05_http_server.py` | *Planned* | Web Server Implementation |
-| `06_ssl_client.py` | *Planned* | SSL/TLS Secure Connection |
-| `07_mqtt_client.py` | *Planned* | MQTT Client |
-| `08_aws_iot_mqtt.py` | *Planned* | AWS IoT Core Integration |
+| **`02_tcp_client_loopback.py`** | **Active** | • TCP Client Loopback<br>• UART mode example |
+| **`02_tcp_client_loopback_spi.py`** | **Active** | • TCP Client Loopback<br>• SPI mode example |
+| **`03_tcp_server_loopback.py`** | **Active** | • TCP Server Loopback<br>• SPI/UART support |
+| **`04_udp_loopback.py`** | **Active** | • UDP Loopback<br>• SPI/UART support |
+| **`05_http_client.py`** | **Active** | • HTTP GET Request<br>• httpbin.org test<br>• SPI/UART support |
+| **`06_webserver.py`** | **Active** | • Web Server Example<br>• TCP Server mode<br>• Serves HTML response<br>• SPI/UART support |
 
 ### 3. Hardware Configuration
 
