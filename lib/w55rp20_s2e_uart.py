@@ -233,10 +233,24 @@ def recv_data_mv():
     Non-blocking DATA receive (Zero-Copy).
     returns: (memoryview, length)
     """
-    n = uart.readinto(_RX_BUF)   # No allocation
+    # Check if data is available first
+    n = uart.any()
     if not n:
         return (None, 0)
-    return (_RX_MV, n)
+    
+    # Read available data (up to buffer size)
+    if n > CAP_MAX:
+        n = CAP_MAX
+    
+    # Use read() instead of readinto() for better compatibility
+    data = uart.read(n)
+    if not data:
+        return (None, 0)
+    
+    # Copy to buffer and return memoryview
+    actual_len = len(data)
+    _RX_BUF[0:actual_len] = data
+    return (_RX_MV, actual_len)
 
 def send_data(payload, length=None):
     """
@@ -271,3 +285,4 @@ def print_info():
     print("=== W55RP20-S2E UART Master ===")
     print(f"UART{UART_ID} baud={UART_BAUD} TX=GP{UART_TX} RX=GP{UART_RX}")
     print(f"Buffer CAP_MAX={CAP_MAX}")
+

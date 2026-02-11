@@ -23,7 +23,8 @@ W55RP20-S2E_MPY/
     ├── 03_tcp_server_loopback.py        # (Active) TCP 서버 루프백
     ├── 04_udp_loopback.py               # (Active) UDP 루프백
     ├── 05_http_client.py                # (Active) HTTP GET 요청
-    └── 06_webserver.py                  # (Active) 웹 서버
+    ├── 06_web_server.py                 # (Active) 웹 서버
+    └── 07_ssl_client.py                 # (Active) SSL/TLS 클라이언트
 ```
 
 ### 2. 예제 파일 상세 (Example Files)
@@ -31,11 +32,11 @@ W55RP20-S2E_MPY/
 | :--- | :--- | :--- |
 | **`01_at_cmd_tester.py`** | **Active** | • **기본 예제:** AT 커맨드 전송 및 응답 확인<br>• **모드 선택:** SPI/UART 설정 가능<br>• **안전장치:** `try-except` 적용됨 |
 | **`02_tcp_client_loopback.py`** | **Active** | • TCP 클라이언트 루프백<br>• UART 모드 예제 |
-| **`02_tcp_client_loopback_spi.py`** | **Active** | • TCP 클라이언트 루프백<br>• SPI 모드 예제 |
 | **`03_tcp_server_loopback.py`** | **Active** | • TCP 서버 루프백<br>• SPI/UART 지원 |
 | **`04_udp_loopback.py`** | **Active** | • UDP 루프백 통신<br>• SPI/UART 지원 |
 | **`05_http_client.py`** | **Active** | • HTTP GET 요청 예제<br>• httpbin.org 테스트<br>• SPI/UART 지원 |
-| **`06_webserver.py`** | **Active** | • 웹 서버 예제<br>• TCP Server 모드<br>• HTML 응답 전송<br>• SPI/UART 지원 |
+| **`06_web_server.py`** | **Active** | • 웹 서버 예제<br>• TCP Server 모드<br>• HTML 응답 전송<br>• SPI/UART 지원 |
+| **`07_ssl_client.py`** | **Active** | • SSL/TLS 클라이언트<br>• 암호화 통신<br>• 루프백 에코<br>• SPI/UART 지원 |
 
 ### 3. 하드웨어 구성 (Pin Configuration)
 
@@ -77,12 +78,12 @@ W55RP20-S2E_MPY/
 │
 └── examples/                     # [Apps] Example Applications
     ├── 01_at_cmd_tester.py              # (Active) Basic AT Command Test
-    ├── 02_tcp_client_loopback_spi.py    # (Active) TCP Client Loopback (SPI)
     ├── 02_tcp_client_loopback.py        # (Active) TCP Client Loopback (UART)
     ├── 03_tcp_server_loopback.py        # (Active) TCP Server Loopback
     ├── 04_udp_loopback.py               # (Active) UDP Loopback
     ├── 05_http_client.py                # (Active) HTTP GET Request
-    └── 06_webserver.py                  # (Active) Web Server
+    ├── 06_web_server.py                 # (Active) Web Server
+    └── 07_ssl_client.py                 # (Active) SSL/TLS Client
 ```
 
 ### 2. Example Files List
@@ -90,11 +91,11 @@ W55RP20-S2E_MPY/
 | :--- | :--- | :--- |
 | **`01_at_cmd_tester.py`** | **Active** | • **Basic:** Sends AT commands & checks responses<br>• **Mode:** Supports SPI/UART selection<br>• **Safety:** Includes `try-except` logic |
 | **`02_tcp_client_loopback.py`** | **Active** | • TCP Client Loopback<br>• UART mode example |
-| **`02_tcp_client_loopback_spi.py`** | **Active** | • TCP Client Loopback<br>• SPI mode example |
 | **`03_tcp_server_loopback.py`** | **Active** | • TCP Server Loopback<br>• SPI/UART support |
 | **`04_udp_loopback.py`** | **Active** | • UDP Loopback<br>• SPI/UART support |
 | **`05_http_client.py`** | **Active** | • HTTP GET Request<br>• httpbin.org test<br>• SPI/UART support |
-| **`06_webserver.py`** | **Active** | • Web Server Example<br>• TCP Server mode<br>• Serves HTML response<br>• SPI/UART support |
+| **`06_web_server.py`** | **Active** | • Web Server Example<br>• TCP Server mode<br>• Serves HTML response<br>• SPI/UART support |
+| **`07_ssl_client.py`** | **Active** | • SSL/TLS Client<br>• Encrypted communication<br>• Loopback echo<br>• SPI/UART support |
 
 ### 3. Hardware Configuration
 
