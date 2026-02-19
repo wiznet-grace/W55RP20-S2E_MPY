@@ -1,7 +1,7 @@
 # 08_mqtt_client.py
 #
 # MQTT Client example (Supports both SPI and UART modes):
-# - Configure the module as MQTT client (OP=5)
+# - Configure the module as MQTT client (OP=5) + DHCP
 # - Connect to broker, subscribe to topic, and handle incoming messages
 #
 # Select mode by changing the MODE variable below.
@@ -12,8 +12,6 @@ import time
 # Configuration
 # -------------------------------------------------------------------------
 MODE     = "uart"  # Set to "spi" or "uart"
-
-# IP Configuration Mode
 USE_DHCP = True    # True: DHCP (IM=1), False: Static IP (IM=0)
 
 # MQTT Broker Settings
