@@ -31,10 +31,6 @@ AFTER_RT_WAIT_MS = 20000        # Wait time after reboot for SSL handshake (20s)
 # Timing constants
 UART_GUARD_MS = 1000
 
-# SPI specific constants
-SPI_CONNECT_TIMEOUT_MS = 30000
-SPI_ST_POLL_MS = 500
-
 # -------------------------------------------------------------------------
 # Driver Import
 # -------------------------------------------------------------------------
