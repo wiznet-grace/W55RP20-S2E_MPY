@@ -22,7 +22,7 @@ W55RP20-S2E_MPY/
 │
 └── examples/                     # [Apps] Example Applications
     ├── 01_at_cmd_tester.py              # (Active) Basic AT Command Test
-    ├── 02_tcp_client_loopback.py        # (Active) TCP Client Loopback (UART)
+    ├── 02_tcp_client_loopback.py        # (Active) TCP Client Loopback
     ├── 03_tcp_server_loopback.py        # (Active) TCP Server Loopback
     ├── 04_udp_loopback.py               # (Active) UDP Loopback
     ├── 05_http_client.py                # (Active) HTTP GET Request
@@ -36,7 +36,7 @@ W55RP20-S2E_MPY/
 | File Name | Status | Description |
 | :--- | :--- | :--- |
 | **`01_at_cmd_tester.py`** | **Active** | • **Basic:** Sends AT commands & checks responses<br>• **Mode:** Supports SPI/UART selection<br>|
-| **`02_tcp_client_loopback.py`** | **Active** | • TCP Client Loopback<br>• UART mode example |
+| **`02_tcp_client_loopback.py`** | **Active** | • TCP Client Loopback<br>• SPI/UART support |
 | **`03_tcp_server_loopback.py`** | **Active** | • TCP Server Loopback<br>• SPI/UART support |
 | **`04_udp_loopback.py`** | **Active** | • UDP Loopback<br>• SPI/UART support |
 | **`05_http_client.py`** | **Active** | • HTTP GET Request<br>• httpbin.org test<br>• SPI/UART support |
